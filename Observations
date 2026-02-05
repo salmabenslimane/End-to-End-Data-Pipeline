@@ -1,0 +1,5 @@
+categories is a list of dictionaries ([{"name": "Productivity", "id": "PRODUCTIVITY"}]). Hard to use in a table without flattening.
+histogram is a list [2138, 790, 1580, 7463, 115934] → corresponds to 1–5 stars but isn’t labeled, so not directly interpretable.
+Text-heavy fields : description, descriptionHTML, summary are very long text. Not suitable for numeric analytics unless we use NLP which is not the case 
+Missing or null fields saleTime, originalPrice, saleText, developerAddress, video, videoImage
+Fields not useful for analytics icon, headerImage, screenshots, url → mostly for display, not numeric or categorical analysis.
