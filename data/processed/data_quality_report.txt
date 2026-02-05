@@ -1,0 +1,49 @@
+Apps dataset shape: (20, 8)
+Reviews dataset shape: (10929, 8)
+Apps columns: ['appId', 'title', 'developer', 'score', 'ratings', 'installs', 'genre', 'price']
+Reviews columns: ['app_id', 'app_name', 'reviewId', 'userName', 'score', 'content', 'thumbsUpCount', 'at']
+App IDs in reviews not in apps catalog: set()
+Duplicate appIds in apps catalog: 0
+Duplicate reviewIds in reviews: 0
+
+Apps numeric summary:
+           score        ratings      installs  price
+count  20.000000      20.000000  2.000000e+01   20.0
+mean    4.493690   45787.450000  1.930500e+06    0.0
+std     0.202665   89822.389098  3.267250e+06    0.0
+min     3.950000     841.000000  1.000000e+04    0.0
+25%     4.373462    1996.250000  1.000000e+05    0.0
+50%     4.554074    7469.000000  1.000000e+05    0.0
+75%     4.610890   26104.000000  2.000000e+06    0.0
+max     4.831123  333472.000000  1.000000e+07    0.0
+
+Reviews numeric summary:
+              score  thumbsUpCount
+count  10929.000000   10929.000000
+mean       3.984171       1.799890
+std        1.532059      11.121004
+min        1.000000       0.000000
+25%        3.000000       0.000000
+50%        5.000000       0.000000
+75%        5.000000       0.000000
+max        5.000000     417.000000
+
+Reviews per day (sample 5 rows):
+at
+2023-09-04    1
+2023-09-07    1
+2023-09-11    1
+2023-09-12    1
+2023-09-30    1
+dtype: int64
+
+Negative thumbsUpCount reviews: 0
+Apps with installs <=0: 0
+Apps with score outside 0-5:
+Empty DataFrame
+Columns: [appId, title, developer, score, ratings, installs, genre, price]
+Index: []
+Reviews with score outside 0-5:
+Empty DataFrame
+Columns: [app_id, app_name, reviewId, userName, score, content, thumbsUpCount, at]
+Index: []

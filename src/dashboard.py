@@ -4,7 +4,7 @@ import plotly.express as px
 from pathlib import Path
 
 # --- Paths ---
-SRC_DIR = Path(_file_).resolve().parent
+SRC_DIR = Path(__file__).resolve().parent
 BASE_DIR = SRC_DIR.parent
 PROCESSED_DIR = BASE_DIR / "data" / "processed"
 
