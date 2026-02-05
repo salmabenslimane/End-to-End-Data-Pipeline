@@ -4,7 +4,7 @@ from pathlib import Path
 
 def transform_apps_reviews():
     # --- Paths ---
-    SRC_DIR = Path(_file_).resolve().parent
+    SRC_DIR = Path(__file__).resolve().parent
     BASE_DIR = SRC_DIR.parent  # project root
     RAW_DIR = BASE_DIR / "data" / "raw"
     PROCESSED_DIR = BASE_DIR / "data" / "processed"
@@ -48,5 +48,5 @@ def transform_apps_reviews():
     print(f"Processed reviews saved to: {PROCESSED_REVIEWS_FILE}")
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     transform_apps_reviews()

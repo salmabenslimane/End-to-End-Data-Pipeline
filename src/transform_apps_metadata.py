@@ -4,7 +4,7 @@ from pathlib import Path
 
 def transform_apps_metadata():
     # --- Paths ---
-    SRC_DIR = Path(_file_).resolve().parent
+    SRC_DIR = Path(__file__).resolve().parent
     BASE_DIR = SRC_DIR.parent  # project root
     RAW_DIR = BASE_DIR / "data" / "raw"
     PROCESSED_DIR = BASE_DIR / "data" / "processed"
@@ -51,5 +51,5 @@ def transform_apps_metadata():
 
     print(f"Processed apps metadata saved to: {PROCESSED_APPS_FILE}")
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     transform_apps_metadata()
