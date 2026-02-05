@@ -64,10 +64,10 @@ for a in apps:
             break
 
 with open(APPS_JSON, "w", encoding="utf-8") as f:
-    json.dump(apps_metadata, f, ensure_ascii=False, indent=2)
+    json.dump(apps_metadata, f, ensure_ascii=False, indent=2, default=str)
 
 with open(REVIEWS_JSONL, "w", encoding="utf-8") as f:
     for review in all_reviews:
-        f.write(json.dumps(review, ensure_ascii=False) + "\n")
+        f.write(json.dumps(review, ensure_ascii=False, default=str) + "\n")
 
 print("Done ✅")
