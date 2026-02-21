@@ -2,6 +2,34 @@ import json
 import pandas as pd
 from pathlib import Path
 
+# Column name mapping: maps any known variant -> our standard internal name
+COLUMN_ALIASES = {
+    "app_id":        "app_id",
+    "appId":         "app_id",
+    "app_name":      "app_name",
+    "appTitle":      "app_name",
+    "reviewId":      "reviewId",
+    "review_id":     "reviewId",
+    "userName":      "userName",
+    "username":      "userName",
+    "score":         "score",
+    "rating":        "score",
+    "content":       "content",
+    "review_text":   "content",
+    "thumbsUpCount": "thumbsUpCount",
+    "likes":         "thumbsUpCount",
+    "at":            "at",
+    "review_time":   "at",
+}
+
+def normalize_columns(df):
+    """Rename columns to standard internal names using COLUMN_ALIASES."""
+    rename_map = {col: COLUMN_ALIASES[col] for col in df.columns if col in COLUMN_ALIASES}
+    unknown = [col for col in df.columns if col not in COLUMN_ALIASES]
+    if unknown:
+        print(f"WARNING: Unknown columns ignored during normalization: {unknown}")
+    return df.rename(columns=rename_map)
+
 def transform_apps_reviews(reviews_source=None):
     # --- Paths ---
     SRC_DIR = Path(__file__).resolve().parent
@@ -43,13 +71,26 @@ def transform_apps_reviews(reviews_source=None):
         df_reviews = pd.DataFrame(reviews_list)
 
     elif reviews_source.suffix == ".csv":
-        df_reviews = pd.read_csv(reviews_source, parse_dates=["at"])
-        # app_name may already be in the CSV, but we still validate app_ids
+        df_reviews = pd.read_csv(reviews_source)
+
+        # Normalize column names to handle schema drift
+        df_reviews = normalize_columns(df_reviews)
+
+        # Parse dates after normalization so we always target the standard "at" column
+        # errors="coerce" handles format variations e.g. "2025/02/05" vs "2025-02-05"
+        df_reviews["at"] = pd.to_datetime(df_reviews["at"], errors="coerce")
+
+        # Fill optional fields that may be missing after normalization
+        df_reviews["content"] = df_reviews.get("content", pd.Series(dtype=str)).fillna("")
+        df_reviews["thumbsUpCount"] = df_reviews.get("thumbsUpCount", pd.Series(dtype=float)).fillna(0)
+       
+        # Derive app_name from catalog if not present in the file
         if "app_name" not in df_reviews.columns:
             df_reviews["app_name"] = df_reviews["app_id"].map(app_id_to_name)
 
     else:
         raise ValueError(f"Unsupported reviews file format: {reviews_source.suffix}")
+    
 
     # --- Handle duplicates: keep first occurrence of each reviewId ---
     duplicates = df_reviews["reviewId"].duplicated().sum()
