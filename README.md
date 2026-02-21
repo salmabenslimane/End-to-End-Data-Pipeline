@@ -38,3 +38,14 @@ Feedback:
 
 3. How localized or widespread are the required code changes?
 -> The fix was fully localized to transform_apps_reviews.py. Because normalization happens at load time, all downstream scripts (serve_layer_metrics, verify_data_quality, dashboard) required zero changes, they continue to operate on the standard column names. This confirms that the transformation layer is the correct place to absorb schema changes.
+
+# Observations on dirty and inconsistent data records:
+
+1. How does your pipeline handle invalid ratings or timestamps?
+-> score coerced to numeric via pd.to_numeric(errors="coerce"): "five" (r_2101) and empty (r_2105) become NaN. Out-of-range scores (-1 for r_2102, 0 for r_2109) are detected and explicitly set to NaN with a warning. Malformed timestamps like "not_a_date" (r_2103) become NaT via pd.to_datetime(errors="coerce"). All problematic rows are logged before any action is taken.
+
+2. Are problematic records filtered out, transformed, or propagated downstream?
+-> Records are kept but their invalid fields are neutralized: bad scores become NaN, bad timestamps become NaT, string "NULL" in thumbsUpCount and content are replaced with 0 and "" respectively. No rows are dropped. This means reviews with NaN scores are still counted in num_reviews in the serving layer but excluded from avg_rating calculations. Reviews with NaT timestamps are excluded from daily_metrics aggregations.
+
+3. Do data quality issues surface early, or do they affect aggregated metrics silently?
+-> With the fix, they surface early — every problematic record is printed with its reviewId at transformation time, before any aggregation happens. Without the fix (old behavior with parse_dates and no dtype=str), pandas would have silently coerced types on load, "five" would become NaN with no warning, and 0/-1 scores would have passed through unchecked and directly lowered average ratings in the serving layer.
