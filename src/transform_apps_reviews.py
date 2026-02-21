@@ -30,6 +30,50 @@ def normalize_columns(df):
         print(f"WARNING: Unknown columns ignored during normalization: {unknown}")
     return df.rename(columns=rename_map)
 
+def clean_dirty_records(df):
+    """
+    Detect and handle invalid, missing, or inconsistent values.
+    - score: coerce to numeric, flag and remove out-of-range values (valid: 1-5)
+    - at: coerce to datetime, flag rows with malformed timestamps
+    - thumbsUpCount: coerce to numeric, replace NULL strings and NaN with 0
+    - content: replace string "NULL" with empty string
+    All problematic rows are logged before any action is taken.
+    """
+    # --- score: coerce to numeric (handles "five", empty strings, etc.) ---
+    df["score"] = pd.to_numeric(df["score"], errors="coerce")
+    invalid_score_type = df["score"].isna()
+
+    # Flag out-of-range scores (valid range: 1-5)
+    out_of_range = df["score"].notna() & ~df["score"].between(1, 5)
+
+    if invalid_score_type.any():
+        print(f"WARNING: {invalid_score_type.sum()} review(s) have non-numeric scores — score set to NaN:")
+        print(df[invalid_score_type][["reviewId", "score"]].to_string(index=False))
+
+    if out_of_range.any():
+        print(f"WARNING: {out_of_range.sum()} review(s) have out-of-range scores (not in 1-5) — score set to NaN:")
+        print(df[out_of_range][["reviewId", "score"]].to_string(index=False))
+
+    # Set out-of-range scores to NaN so they don't corrupt aggregates
+    df.loc[out_of_range, "score"] = None
+
+    # --- at: coerce malformed timestamps to NaT ---
+    df["at"] = pd.to_datetime(df["at"], errors="coerce")
+    invalid_dates = df["at"].isna()
+    if invalid_dates.any():
+        print(f"WARNING: {invalid_dates.sum()} review(s) have malformed timestamps — 'at' set to NaT:")
+        print(df[invalid_dates][["reviewId", "at"]].to_string(index=False))
+
+    # --- thumbsUpCount: replace string "NULL" then coerce, fill remaining NaN with 0 ---
+    df["thumbsUpCount"] = df["thumbsUpCount"].replace("NULL", None)
+    df["thumbsUpCount"] = pd.to_numeric(df["thumbsUpCount"], errors="coerce").fillna(0).astype(int)
+
+    # --- content: replace string "NULL" with empty string ---
+    df["content"] = df["content"].replace("NULL", "").fillna("")
+
+    return df
+
+
 def transform_apps_reviews(reviews_source=None):
     # --- Paths ---
     SRC_DIR = Path(__file__).resolve().parent
@@ -71,26 +115,21 @@ def transform_apps_reviews(reviews_source=None):
         df_reviews = pd.DataFrame(reviews_list)
 
     elif reviews_source.suffix == ".csv":
-        df_reviews = pd.read_csv(reviews_source)
-
+        # Load all as strings first so we can detect dirty values before pandas coerces them
+        df_reviews = pd.read_csv(reviews_source, dtype=str)
         # Normalize column names to handle schema drift
         df_reviews = normalize_columns(df_reviews)
-
-        # Parse dates after normalization so we always target the standard "at" column
-        # errors="coerce" handles format variations e.g. "2025/02/05" vs "2025-02-05"
-        df_reviews["at"] = pd.to_datetime(df_reviews["at"], errors="coerce")
-
+        # Clean dirty and inconsistent records explicitly
+        df_reviews = clean_dirty_records(df_reviews)
         # Fill optional fields that may be missing after normalization
         df_reviews["content"] = df_reviews.get("content", pd.Series(dtype=str)).fillna("")
         df_reviews["thumbsUpCount"] = df_reviews.get("thumbsUpCount", pd.Series(dtype=float)).fillna(0)
-       
         # Derive app_name from catalog if not present in the file
         if "app_name" not in df_reviews.columns:
             df_reviews["app_name"] = df_reviews["app_id"].map(app_id_to_name)
 
     else:
         raise ValueError(f"Unsupported reviews file format: {reviews_source.suffix}")
-    
 
     # --- Handle duplicates: keep first occurrence of each reviewId ---
     duplicates = df_reviews["reviewId"].duplicated().sum()
@@ -114,5 +153,7 @@ if __name__ == "__main__":
     import sys
     # Default: use original JSONL
     # To use batch2: python transform_apps_reviews.py data/raw/note_taking_ai_reviews_batch2.csv
+    # To use schema drift:  python transform_apps_reviews.py data/raw/note_taking_ai_reviews_schema_drift.csv
+    # To use dirty data:    python transform_apps_reviews.py data/raw/note_taking_ai_reviews_dirty.csv
     source = sys.argv[1] if len(sys.argv) > 1 else None
     transform_apps_reviews(reviews_source=source)
