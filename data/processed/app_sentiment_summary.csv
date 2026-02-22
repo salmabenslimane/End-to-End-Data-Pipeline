@@ -1,0 +1,21 @@
+app_id,app_name,total_reviews,contradiction_count,positive_text_low_score,negative_text_high_score,contradiction_pct
+ai.fireflies.mobile,Fireflies: AI notetaker,291,15,15,0,5.15
+ai.meeting.app,Meeting.ai: AI Visual Notes,127,4,4,0,3.15
+ai.notes.notebook,HyNote: AI Notebook LLM Notes,254,13,12,1,5.12
+ai.plaud.android.plaud,Plaud: AI Note Taker,1000,20,14,6,2.0
+ai.turbolearn,Turbo AI - Notetaker,1000,27,24,3,2.7
+app.coconote,Coconote - AI Note Taker,163,8,5,3,4.91
+com.aisense.otter,OtterAI Transcribe Voice Notes,1000,61,50,11,6.1
+com.codespaceapps.meetingtranscriber,Smart Noter - AI Note Taker,1000,41,39,2,4.1
+com.feraset.ainote,AI Note Taker - Meeting Notes,75,3,3,0,4.0
+com.google.android.apps.labs.language.tailwind,Google NotebookLM,1000,15,14,1,1.5
+com.hubx.noteai,Note AI: Smart Note Taker,489,22,20,2,4.5
+com.ma.waveapp,Wave AI Note Taker & Recorder,259,9,7,2,3.47
+com.meetgeek.assistant,AI Transcribe. Speech to Text,70,2,2,0,2.86
+com.recordpro.audiorecord,HiNoter - AI Note Taker,29,0,0,0,0.0
+com.sota.ainotex,NoteX: AI Notes & Meetings,106,5,5,0,4.72
+com.studocu.app,Studocu: AI Notes & Summaries,1000,25,22,3,2.5
+com.yygg.note.app,"Notewise - AI Notes, PDF, Docs",1000,51,36,15,5.1
+evolly.app.ainote,AI Note Taker - Voice to Notes,81,2,2,0,2.47
+io.labhouse.audioapp,Summary - AI Note Taker,985,41,40,1,4.16
+notion.id,"Notion: Notes, Tasks, AI",1000,47,36,11,4.7

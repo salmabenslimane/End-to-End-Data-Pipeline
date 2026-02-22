@@ -60,3 +60,17 @@ Feedback:
 
 3. Are downstream aggregates affected in ways that are immediately visible?
 -> app-level KPIs in serve_layer_metrics.py are based on reviews data, not apps metadata, so duplicates in the catalog do not directly inflate review counts. However, without deduplication, a duplicate appId would produce two rows in apps_catalog.csv, and any downstream join or lookup would become non-deterministic depending on which row pandas happened to use. Missing installs and scores for com.unknown.ai are visible in the catalog as NaN but do not affect review aggregations — they would only matter if installs or app-level score were used in the dashboard or serving layer.
+
+# Observations on new business logic stress test:
+
+1. Where in your pipeline would this new logic naturally belong?
+-> In transform_apps_reviews.py, as a new function add_sentiment_heuristic() called after cleaning and deduplication. It derives new fields (sentiment_label, sentiment_contradicts_score, contradiction_type) from existing columns (content + score) and saves them into apps_reviews.csv. This way all downstream consumers automatically have access to the sentiment fields without any further changes.
+
+2. How many parts of the pipeline would need to change to support this request?
+-> Two: transform_apps_reviews.py gains the sentiment function and its call, and serve_layer_metrics.py gains a new generate_sentiment_contradiction_report() function that produces two new output files — sentiment_contradictions.csv (one row per contradicting review) and app_sentiment_summary.csv (one row per app with contradiction counts and percentages). The raw data, verify_data_quality.py, and dashboard.py required zero changes.
+
+3. Would this logic be easy to reuse or maintain if additional business questions were introduced?
+-> Partially. The keyword lists (POSITIVE_KEYWORDS, NEGATIVE_KEYWORDS) are defined at the top of the file and easy to extend. Adding a new contradiction type would only require updating classify_sentiment() and detect_contradiction(). However the heuristic is brittle, it cannot handle negations ("not great"), sarcasm, or mixed-sentiment reviews, so any serious expansion of this business question would require replacing the keyword approach with a proper NLP model, which would be a more significant change.
+
+4. Does your current pipeline structure clearly separate data preparation from analytical logic?
+-> Mostly yes. Raw loading, cleaning, and field derivation all live in transform_apps_reviews.py. Aggregation and serving outputs live in serve_layer_metrics.py. The dashboard only reads from processed files and never touches raw data. The separation held cleanly for this request, sentiment labeling was added to the transformation layer and the serving layer only needed a new aggregation function, with no logic leaking between stages.
