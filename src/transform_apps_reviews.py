@@ -2,16 +2,139 @@ import json
 import pandas as pd
 from pathlib import Path
 
-def clean_installs(value):
-    """Convert installs field to integer. Handles '1,000,000+', '500000', missing values."""
-    if pd.isna(value) or str(value).strip() == "":
-        return None
-    try:
-        return int(str(value).replace(",", "").replace("+", "").strip())
-    except ValueError:
-        return None
+# Column name mapping: maps any known variant -> our standard internal name
+COLUMN_ALIASES = {
+    "app_id":        "app_id",
+    "appId":         "app_id",
+    "app_name":      "app_name",
+    "appTitle":      "app_name",
+    "reviewId":      "reviewId",
+    "review_id":     "reviewId",
+    "userName":      "userName",
+    "username":      "userName",
+    "score":         "score",
+    "rating":        "score",
+    "content":       "content",
+    "review_text":   "content",
+    "thumbsUpCount": "thumbsUpCount",
+    "likes":         "thumbsUpCount",
+    "at":            "at",
+    "review_time":   "at",
+}
 
-def transform_apps_metadata(apps_source=None):
+# --- Sentiment heuristic keyword lists ---
+POSITIVE_KEYWORDS = [
+    "love", "great", "excellent", "amazing", "fantastic", "perfect",
+    "best", "awesome", "wonderful", "good", "nice", "helpful", "useful",
+    "easy", "fast", "smooth", "clean", "recommend"
+]
+NEGATIVE_KEYWORDS = [
+    "terrible", "worst", "horrible", "awful", "bad", "broken", "buggy",
+    "crash", "crashes", "slow", "useless", "waste", "disappointing",
+    "problem", "issue", "error", "hate", "poor", "laggy", "unstable"
+]
+
+def normalize_columns(df):
+    """Rename columns to standard internal names using COLUMN_ALIASES."""
+    rename_map = {col: COLUMN_ALIASES[col] for col in df.columns if col in COLUMN_ALIASES}
+    unknown = [col for col in df.columns if col not in COLUMN_ALIASES]
+    if unknown:
+        print(f"WARNING: Unknown columns ignored during normalization: {unknown}")
+    return df.rename(columns=rename_map)
+
+
+def clean_dirty_records(df):
+    """
+    Detect and handle invalid, missing, or inconsistent values.
+    - score: coerce to numeric, flag and remove out-of-range values (valid: 1-5)
+    - at: coerce to datetime, flag rows with malformed timestamps
+    - thumbsUpCount: coerce to numeric, replace NULL strings and NaN with 0
+    - content: replace string "NULL" with empty string
+    All problematic rows are logged before any action is taken.
+    """
+    # --- score: coerce to numeric (handles "five", empty strings, etc.) ---
+    df["score"] = pd.to_numeric(df["score"], errors="coerce")
+    invalid_score_type = df["score"].isna()
+
+    # Flag out-of-range scores (valid range: 1-5)
+    out_of_range = df["score"].notna() & ~df["score"].between(1, 5)
+
+    if invalid_score_type.any():
+        print(f"WARNING: {invalid_score_type.sum()} review(s) have non-numeric scores — score set to NaN:")
+        print(df[invalid_score_type][["reviewId", "score"]].to_string(index=False))
+
+    if out_of_range.any():
+        print(f"WARNING: {out_of_range.sum()} review(s) have out-of-range scores (not in 1-5) — score set to NaN:")
+        print(df[out_of_range][["reviewId", "score"]].to_string(index=False))
+
+    # Set out-of-range scores to NaN so they don't corrupt aggregates
+    df.loc[out_of_range, "score"] = None
+
+    # --- at: coerce malformed timestamps to NaT ---
+    df["at"] = pd.to_datetime(df["at"], errors="coerce")
+    invalid_dates = df["at"].isna()
+    if invalid_dates.any():
+        print(f"WARNING: {invalid_dates.sum()} review(s) have malformed timestamps — 'at' set to NaT:")
+        print(df[invalid_dates][["reviewId", "at"]].to_string(index=False))
+
+    # --- thumbsUpCount: replace string "NULL" then coerce, fill remaining NaN with 0 ---
+    df["thumbsUpCount"] = df["thumbsUpCount"].replace("NULL", None)
+    df["thumbsUpCount"] = pd.to_numeric(df["thumbsUpCount"], errors="coerce").fillna(0).astype(int)
+
+    # --- content: replace string "NULL" with empty string ---
+    df["content"] = df["content"].replace("NULL", "").fillna("")
+
+    return df
+
+
+def add_sentiment_heuristic(df):
+    """
+    Keyword-based sentiment heuristic applied to review content.
+    Adds three columns:
+    - sentiment_label: "positive", "negative", or "neutral"
+    - sentiment_contradicts_score: True if text sentiment contradicts the numeric score
+      (positive text + low score <= 2, or negative text + high score >= 4)
+    - contradiction_type: human-readable label describing the contradiction
+    This logic belongs in the transformation layer because it derives a new field
+    from existing data (content + score) and must be available to all downstream consumers.
+    """
+    def classify_sentiment(text):
+        if not isinstance(text, str) or text.strip() == "":
+            return "neutral"
+        text_lower = text.lower()
+        pos = any(kw in text_lower for kw in POSITIVE_KEYWORDS)
+        neg = any(kw in text_lower for kw in NEGATIVE_KEYWORDS)
+        if pos and not neg:
+            return "positive"
+        elif neg and not pos:
+            return "negative"
+        else:
+            return "neutral"
+
+    df["sentiment_label"] = df["content"].apply(classify_sentiment)
+
+    def detect_contradiction(row):
+        sentiment = row["sentiment_label"]
+        score = row["score"]
+        if pd.isna(score) or sentiment == "neutral":
+            return False, "none"
+        if sentiment == "positive" and score <= 2:
+            return True, "positive_text_low_score"
+        if sentiment == "negative" and score >= 4:
+            return True, "negative_text_high_score"
+        return False, "none"
+
+    results = df.apply(detect_contradiction, axis=1, result_type="expand")
+    df["sentiment_contradicts_score"] = results[0]
+    df["contradiction_type"] = results[1]
+
+    n_contradictions = df["sentiment_contradicts_score"].sum()
+    print(f"Sentiment contradictions detected: {n_contradictions} review(s)")
+
+    return df
+
+
+def transform_apps_reviews(reviews_source=None):
     # --- Paths ---
     SRC_DIR = Path(__file__).resolve().parent
     BASE_DIR = SRC_DIR.parent
@@ -20,76 +143,80 @@ def transform_apps_metadata(apps_source=None):
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
     PROCESSED_APPS_FILE = PROCESSED_DIR / "apps_catalog.csv"
+    PROCESSED_REVIEWS_FILE = PROCESSED_DIR / "apps_reviews.csv"
+
+    # --- Load apps catalog for app names ---
+    apps_df = pd.read_csv(PROCESSED_APPS_FILE, usecols=["appId", "title"])
+    known_app_ids = set(apps_df["appId"])
+    app_id_to_name = dict(zip(apps_df["appId"], apps_df["title"]))
 
     # --- Determine source file ---
-    if apps_source is None:
-        apps_source = RAW_DIR / "apps_metadata.json"
-    apps_source = Path(apps_source)
+    if reviews_source is None:
+        reviews_source = RAW_DIR / "reviews.jsonl"
+    reviews_source = Path(reviews_source)
 
-    # --- Load depending on format ---
-    if apps_source.suffix == ".json":
-        with open(apps_source, "r", encoding="utf-8") as f:
-            apps_raw = json.load(f)
+    # --- Load reviews depending on format ---
+    if reviews_source.suffix == ".jsonl":
+        reviews_list = []
+        with open(reviews_source, "r", encoding="utf-8") as f:
+            for line in f:
+                r = json.loads(line)
+                at = pd.to_datetime(r.get("at"), errors="coerce") if r.get("at") else None
+                reviews_list.append({
+                    "app_id": r.get("appId"),
+                    "app_name": app_id_to_name.get(r.get("appId"), None),
+                    "reviewId": r.get("reviewId"),
+                    "userName": r.get("userName"),
+                    "score": r.get("score"),
+                    "content": r.get("content") if r.get("content") else "",
+                    "thumbsUpCount": r.get("thumbsUpCount", 0),
+                    "at": at
+                })
+        df_reviews = pd.DataFrame(reviews_list)
 
-        apps_clean = []
-        for app in apps_raw:
-            installs = app.get("installs")
-            installs_clean = clean_installs(installs)
-            price = app.get("price", 0)
-            price = float(price) if price is not None else 0.0
-            apps_clean.append({
-                "appId":     app.get("appId"),
-                "title":     app.get("title"),
-                "developer": app.get("developer"),
-                "score":     app.get("score"),
-                "ratings":   app.get("ratings"),
-                "installs":  installs_clean,
-                "genre":     app.get("genre"),
-                "price":     price
-            })
-        df_apps = pd.DataFrame(apps_clean)
-
-    elif apps_source.suffix == ".csv":
-        df_apps = pd.read_csv(apps_source, dtype=str)
-
-        # --- Clean installs: handles "1,000,000+", "500000", missing ---
-        df_apps["installs"] = df_apps["installs"].apply(clean_installs)
-
-        # --- Coerce numeric fields ---
-        df_apps["score"]   = pd.to_numeric(df_apps["score"],   errors="coerce")
-        df_apps["ratings"] = pd.to_numeric(df_apps["ratings"], errors="coerce")
-        df_apps["price"]   = pd.to_numeric(df_apps["price"],   errors="coerce").fillna(0.0)
-
-        # --- Flag missing values in key fields ---
-        missing_score = df_apps["score"].isna().sum()
-        missing_installs = df_apps["installs"].isna().sum()
-        if missing_score > 0:
-            print(f"WARNING: {missing_score} app(s) have missing score values:")
-            print(df_apps[df_apps["score"].isna()][["appId", "title", "score"]].to_string(index=False))
-        if missing_installs > 0:
-            print(f"WARNING: {missing_installs} app(s) have missing or unparseable installs values:")
-            print(df_apps[df_apps["installs"].isna()][["appId", "title", "installs"]].to_string(index=False))
+    elif reviews_source.suffix == ".csv":
+        # Load all as strings first so we can detect dirty values before pandas coerces them
+        df_reviews = pd.read_csv(reviews_source, dtype=str)
+        # Normalize column names to handle schema drift
+        df_reviews = normalize_columns(df_reviews)
+        # Clean dirty and inconsistent records explicitly
+        df_reviews = clean_dirty_records(df_reviews)
+        # Fill optional fields that may be missing after normalization
+        df_reviews["content"] = df_reviews.get("content", pd.Series(dtype=str)).fillna("")
+        df_reviews["thumbsUpCount"] = df_reviews.get("thumbsUpCount", pd.Series(dtype=float)).fillna(0)
+        # Derive app_name from catalog if not present in the file
+        if "app_name" not in df_reviews.columns:
+            df_reviews["app_name"] = df_reviews["app_id"].map(app_id_to_name)
 
     else:
-        raise ValueError(f"Unsupported apps metadata format: {apps_source.suffix}")
+        raise ValueError(f"Unsupported reviews file format: {reviews_source.suffix}")
 
-    # --- Handle duplicate appIds: log and keep first occurrence ---
-    duplicates = df_apps["appId"].duplicated()
-    if duplicates.any():
-        print(f"WARNING: {duplicates.sum()} duplicate appId(s) found — keeping first occurrence:")
-        print(df_apps[duplicates][["appId", "title"]].to_string(index=False))
-    df_apps = df_apps.drop_duplicates(subset="appId", keep="first")
+    # --- Handle duplicates: keep first occurrence of each reviewId ---
+    duplicates = df_reviews["reviewId"].duplicated().sum()
+    print(f"Duplicate reviewIds found: {duplicates} — keeping first occurrence")
+    df_reviews = df_reviews.drop_duplicates(subset="reviewId", keep="first")
 
-    # --- Save to CSV ---
-    if PROCESSED_APPS_FILE.exists():
-        PROCESSED_APPS_FILE.unlink()
-    df_apps.to_csv(PROCESSED_APPS_FILE, index=False, encoding="utf-8")
-    print(f"Processed apps metadata saved to: {PROCESSED_APPS_FILE}")
+    # --- Handle unknown apps: flag reviews with no matching app in catalog ---
+    unknown_apps = df_reviews[~df_reviews["app_id"].isin(known_app_ids)]["app_id"].unique()
+    if len(unknown_apps) > 0:
+        print(f"WARNING: Reviews reference app_ids not in apps catalog: {list(unknown_apps)}")
+        print(f"These reviews will be kept but app_name will be None.")
+
+    # --- Add sentiment heuristic (new business logic, step C.5) ---
+    df_reviews = add_sentiment_heuristic(df_reviews)
+
+    # --- Save processed reviews ---
+    if PROCESSED_REVIEWS_FILE.exists():
+        PROCESSED_REVIEWS_FILE.unlink()
+    df_reviews.to_csv(PROCESSED_REVIEWS_FILE, index=False, encoding="utf-8")
+    print(f"Processed reviews saved to: {PROCESSED_REVIEWS_FILE}")
 
 
 if __name__ == "__main__":
     import sys
-    # Default: use original JSON
-    # To use updated apps: python transform_apps_metadata.py data/raw/note_taking_ai_apps_updated.csv
+    # Default: use original JSONL
+    # To use batch2:        python transform_apps_reviews.py data/raw/note_taking_ai_reviews_batch2.csv
+    # To use schema drift:  python transform_apps_reviews.py data/raw/note_taking_ai_reviews_schema_drift.csv
+    # To use dirty data:    python transform_apps_reviews.py data/raw/note_taking_ai_reviews_dirty.csv
     source = sys.argv[1] if len(sys.argv) > 1 else None
-    transform_apps_metadata(apps_source=source)
+    transform_apps_reviews(reviews_source=source)
