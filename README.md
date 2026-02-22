@@ -49,3 +49,14 @@ Feedback:
 
 3. Do data quality issues surface early, or do they affect aggregated metrics silently?
 -> With the fix, they surface early — every problematic record is printed with its reviewId at transformation time, before any aggregation happens. Without the fix (old behavior with parse_dates and no dtype=str), pandas would have silently coerced types on load, "five" would become NaN with no warning, and 0/-1 scores would have passed through unchecked and directly lowered average ratings in the serving layer.
+
+# Observations on updated applications metadata:
+
+1. How are duplicate application identifiers handled?
+-> com.otter.ai appears twice — once as "Otter AI" (real entry) and once as "Otter AI Duplicate" (fake dev). The pipeline now explicitly logs the duplicate appId and keeps only the first occurrence. Without this fix, the dict used for app_id_to_name lookups in transform_apps_reviews.py would have silently kept whichever entry pandas loaded last, with no indication that a conflict existed.
+
+2. What happens during joins between reviews and applications?
+-> Because deduplication now happens in transform_apps_metadata.py before saving apps_catalog.csv, the join in transform_apps_reviews.py always operates on a clean one-row-per-appId catalog. Apps with missing scores or installs (com.unknown.ai) are kept in the catalog with NaN values — they will appear in app-level KPIs but their metadata fields will be null.
+
+3. Are downstream aggregates affected in ways that are immediately visible?
+-> app-level KPIs in serve_layer_metrics.py are based on reviews data, not apps metadata, so duplicates in the catalog do not directly inflate review counts. However, without deduplication, a duplicate appId would produce two rows in apps_catalog.csv, and any downstream join or lookup would become non-deterministic depending on which row pandas happened to use. Missing installs and scores for com.unknown.ai are visible in the catalog as NaN but do not affect review aggregations — they would only matter if installs or app-level score were used in the dashboard or serving layer.
